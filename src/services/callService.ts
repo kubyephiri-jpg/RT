@@ -100,13 +100,47 @@ export async function joinChannel(
     }
   }
   let left = false;
+  // Play the other person's voice. Retried because a WebView can refuse the first play().
+  const playRemote = (user: any) => {
+    try {
+      const track = user?.audioTrack;
+      if (!track) return;
+      track.setVolume?.(100);
+      Promise.resolve(track.play()).catch(() => undefined);
+    } catch { /* the track may be gone while the call ends */ }
+  };
+  const playAllRemote = () => client.remoteUsers.forEach(playRemote);
+  // If the browser blocked audio until a tap, start it on the next touch.
+  (AgoraRTC as any).onAutoplayFailed = () => {
+    const resume = () => { playAllRemote(); window.removeEventListener('touchstart', resume); window.removeEventListener('click', resume); };
+    window.addEventListener('touchstart', resume, { once: true });
+    window.addEventListener('click', resume, { once: true });
+  };
   client.on('user-published', async (user, mediaType) => {
-    await client.subscribe(user, mediaType);
+    try { await client.subscribe(user, mediaType); } catch (e) { console.warn('subscribe failed', e); return; }
     if (mediaType === 'audio' && user.audioTrack) {
-      user.audioTrack.play();
+      playRemote(user);
+      setTimeout(() => playRemote(user), 1000);
       onRemoteAudio?.();
     }
   });
+  // If the app was in the background (e.g. answered from the lock screen) the microphone can
+  // come back silent. Rebuild it when the screen is visible again.
+  const refreshMic = async () => {
+    try {
+      if (!localAudioTrack || !microphonePublished) return;
+      const raw = localAudioTrack.getMediaStreamTrack();
+      if (raw.readyState === 'ended' || raw.muted) {
+        const old = localAudioTrack;
+        await client.unpublish([old]).catch(() => undefined);
+        old.close();
+        localAudioTrack = await AgoraRTC.createMicrophoneAudioTrack();
+        await client.publish([localAudioTrack]);
+      }
+    } catch (e) { console.warn('mic refresh failed', e); }
+  };
+  const onVisible = () => { if (document.visibilityState === 'visible') { void refreshMic(); playAllRemote(); } };
+  document.addEventListener('visibilitychange', onVisible);
   try {
     await client.join(credentials.appId, credentials.channel, credentials.token, credentials.uid);
     if (localAudioTrack) {
@@ -114,7 +148,14 @@ export async function joinChannel(
       microphonePublished = true;
       micAvailable = true;
     }
+    // Pick up anyone who was already publishing before we joined.
+    for (const u of client.remoteUsers) {
+      if (u.hasAudio) { try { await client.subscribe(u, 'audio'); playRemote(u); } catch { /* next event retries */ } }
+    }
+    setTimeout(() => { void refreshMic(); playAllRemote(); }, 1500);
+    setTimeout(() => { void refreshMic(); playAllRemote(); }, 4000);
   } catch (error) {
+    document.removeEventListener('visibilitychange', onVisible);
     localAudioTrack?.close();
     await client.leave().catch(() => undefined);
     throw error;
@@ -147,6 +188,7 @@ export async function joinChannel(
     leave: async () => {
       if (left) return;
       left = true;
+      document.removeEventListener('visibilitychange', onVisible);
       localAudioTrack?.close();
       await client.leave();
     },

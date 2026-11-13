@@ -350,6 +350,9 @@ const createArrivalCard = (arrivalTime: string): HTMLElement => {
   return el;
 };
 
+const isNum = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n);
+const validLL = (p: any): p is { lat: number; lng: number } => !!p && isNum(p.lat) && isNum(p.lng);
+
 export const MapLibreMap: React.FC<MapLibreMapProps> = ({
   center = { lat: -15.3875, lng: 28.3228 }, // Lusaka fallback while location is unavailable
   zoom = 13,
@@ -546,6 +549,7 @@ export const MapLibreMap: React.FC<MapLibreMapProps> = ({
 
     // Add/update markers
     markers.forEach(marker => {
+      if (!validLL(marker)) return;
       const existingMarker = markersRef.current[marker.id];
       if (existingMarker) {
         if (marker.type === 'driver') {
@@ -599,12 +603,13 @@ export const MapLibreMap: React.FC<MapLibreMapProps> = ({
     });
 
     // Fit bounds to show all markers
-    if (fitBounds && markers.length > 0) {
+    const goodMarkers = markers.filter(validLL);
+    if (fitBounds && goodMarkers.length > 0) {
       const bounds = new maplibregl.LngLatBounds();
-      markers.forEach(marker => {
+      goodMarkers.forEach(marker => {
         bounds.extend([marker.lng, marker.lat]);
       });
-      if (driverPosition) {
+      if (validLL(driverPosition)) {
         bounds.extend([driverPosition.lng, driverPosition.lat]);
       }
       // Asymmetric padding: the draggable bottom panel covers the lower half of
@@ -686,7 +691,7 @@ export const MapLibreMap: React.FC<MapLibreMapProps> = ({
 
   // Update driver marker with smooth animation
   useEffect(() => {
-    if (!map.current || !isMapLoaded || !driverPosition) return;
+    if (!map.current || !isMapLoaded || !validLL(driverPosition)) return;
 
     if (driverMarkerRef.current) {
       // Animate existing marker
@@ -761,7 +766,7 @@ export const MapLibreMap: React.FC<MapLibreMapProps> = ({
         }
       }
 
-      if (lat === undefined || lng === undefined) return;
+      if (!isNum(lat) || !isNum(lng)) return;
 
   const el = createEtaBubble(pickupEta);
   if (onEtaBubbleClickRef.current) {
@@ -807,7 +812,7 @@ export const MapLibreMap: React.FC<MapLibreMapProps> = ({
         }
       }
 
-      if (lat === undefined || lng === undefined) return;
+      if (!isNum(lat) || !isNum(lng)) return;
 
   const el = createArrivalCard(arrivalTime);
   if (onArrivalCardClickRef.current) {
@@ -827,10 +832,10 @@ export const MapLibreMap: React.FC<MapLibreMapProps> = ({
 
   // Add store marker
   useEffect(() => {
-    if (!map.current || !isMapLoaded || !storePosition) return;
+    if (!map.current || !isMapLoaded || !validLL(storePosition)) return;
 
     const storeMarker = markers.find(m => m.type === 'store');
-    if (!storeMarker && storePosition) {
+    if (!storeMarker && storePosition && validLL(storePosition)) {
       const el = createMarkerElement('store');
       new maplibregl.Marker({ element: el })
         .setLngLat([storePosition.lng, storePosition.lat])

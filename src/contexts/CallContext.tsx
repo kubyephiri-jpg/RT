@@ -4,6 +4,7 @@ import { onValue, ref } from 'firebase/database';
 import { arrayRemove, arrayUnion, doc, updateDoc } from 'firebase/firestore';
 import { auth, database, db } from '../config/firebase';
 import { acceptCall, declineCall, endCall as apiEndCall, getMicPermissionState, joinChannel, MIC_BLOCKED_MESSAGE, primeMicrophone, startCall as apiStartCall, type ActiveCall, type CallCredentials, type MicError } from '../services/callService';
+import { startRingback, stopRingback } from '../utils/ringback';
 import { useActiveOrder } from '../hooks/useActiveOrder';
 import { callServiceStart, callServiceStop, cancelCallNotification, disposeNativeCalls, getCallPermissionStatus, initNativeCalls, isNative, NativeCalls, openCallSettings, requestNativeMicrophonePermission } from '../native/calls';
 
@@ -47,6 +48,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   const micDeniedToastOrdersRef = useRef(new Set<string>());
 
   useEffect(() => { callStateRef.current = callState; }, [callState]);
+  useEffect(() => { if (callState === 'calling') startRingback(); else stopRingback(); return () => stopRingback(); }, [callState]);
   useEffect(() => { snapshotRef.current = snapshot; }, [snapshot]);
 
   const stopAudio = useCallback(() => { audioRef.current?.pause(); if (audioRef.current) audioRef.current.currentTime = 0; if (ringTimerRef.current !== null) { window.clearTimeout(ringTimerRef.current); ringTimerRef.current = null; } }, []);

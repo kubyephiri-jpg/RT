@@ -19,6 +19,14 @@ import { usePreventBack } from '../hooks/usePreventBack';
 import { useGeolocation } from '../hooks/useGeolocation';
 import { markOrderRated } from '../services/orderService';
 
+// Accepts {lat,lng} | {latitude,longitude} | {l:[lat,lng]} (numbers or numeric strings); returns null when unusable.
+const toLL = (v: any): { lat: number; lng: number } | null => {
+  if (!v) return null;
+  const lat = Number(v.lat ?? v.latitude ?? (Array.isArray(v.l) ? v.l[0] : undefined));
+  const lng = Number(v.lng ?? v.lon ?? v.longitude ?? (Array.isArray(v.l) ? v.l[1] : undefined));
+  return Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : null;
+};
+
 interface OrderItem {
   name: string;
   quantity: number;
@@ -341,8 +349,9 @@ export const LiveTrackingPage: React.FC = () => {
         setStatusSubtitle(statusInfo.subtitle);
 
         // Update driver location from order document
-        if (data.driverLocation) {
-          setDriverLocation(data.driverLocation);
+        {
+          const dl = toLL(data.driverLocation);
+          if (dl) setDriverLocation(dl);
         }
 
         // IMPORTANT: Read driver info from the order document's "driverSnapshot" field
@@ -393,9 +402,11 @@ export const LiveTrackingPage: React.FC = () => {
         const ensureGpsListener = () => {
           if (driverIdForGps && !gpsListenerRef.current) {
             gpsListenerRef.current = listenToDriverLocation(driverIdForGps, (loc) => {
-              setDriverLocation({ lat: loc.lat, lng: loc.lng });
+              const ll = toLL(loc);
+              if (!ll) return;
+              setDriverLocation(ll);
               if (fullPolylineRef.current) {
-                const trimmed = trimPolylineFromPosition(fullPolylineRef.current, loc.lat, loc.lng);
+                const trimmed = trimPolylineFromPosition(fullPolylineRef.current, ll.lat, ll.lng);
                 setTrimmedPolyline(trimmed || null);
               }
             });
@@ -528,13 +539,9 @@ export const LiveTrackingPage: React.FC = () => {
     const markers: MapMarker[] = [];
     
     // Store marker
-    if (orderData.storeLocation?.lat && orderData.storeLocation?.lng) {
-      markers.push({
-        id: 'store',
-        type: 'store',
-        lat: orderData.storeLocation.lat,
-        lng: orderData.storeLocation.lng
-      });
+    const storeLL = toLL(orderData.storeLocation);
+    if (storeLL) {
+      markers.push({ id: 'store', type: 'store', lat: storeLL.lat, lng: storeLL.lng });
     }
     
     // NOTE: The destination/dropoff (diamond) marker is intentionally NOT added
@@ -544,12 +551,13 @@ export const LiveTrackingPage: React.FC = () => {
     // Stop markers
     const stops = orderData.stops || [];
     stops.forEach((stop: any, index: number) => {
-      if (stop.lat && stop.lng) {
+      const stopLL = toLL(stop);
+      if (stopLL) {
         markers.push({
           id: `stop-${index}`,
           type: 'stop',
-          lat: stop.lat,
-          lng: stop.lng,
+          lat: stopLL.lat,
+          lng: stopLL.lng,
           label: `${index + 1}`
         });
       }
@@ -598,7 +606,7 @@ export const LiveTrackingPage: React.FC = () => {
           markers={mapMarkers}
           polyline={showRouteOverlay ? (trimmedPolyline ?? undefined) : undefined}
           driverPosition={driverLocation || undefined}
-          storePosition={orderData.storeLocation || undefined}
+          storePosition={toLL(orderData.storeLocation) || undefined}
           vehicleType={(orderData as any)?.vehicleType || driverData?.vehicle?.type || 'car'}
           vehicleColor={(driverFromOrder?.color || driverData?.vehicle?.color)}
           arrivalTime={showRouteOverlay && etaMinutes !== null ? (getArrivalTime() || undefined) : undefined}
