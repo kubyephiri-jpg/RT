@@ -196,7 +196,16 @@ export const YourRoute: React.FC<YourRouteProps> = ({ onRouteComplete }) => {
   }, [location.state]);
 
   // Debounced search for address suggestions
+  // GPS coordinates change constantly; keep them in a ref so the search function (and the
+  // debounce effect that depends on it) stays the same and does not re-fire the search.
+  const geoRef = useRef<{ lat: number | null | undefined; lng: number | null | undefined }>({ lat: geoLat, lng: geoLng });
+  geoRef.current = { lat: geoLat, lng: geoLng };
+  const lastSearchedRef = useRef<string | null>(null);
+
   const searchForAddresses = useCallback(async (query: string) => {
+    const trimmed = (query || '').trim();
+    if (lastSearchedRef.current === trimmed) return; // same text as last time: nothing to do
+    lastSearchedRef.current = trimmed;
     if (!query || query.trim().length < 2) {
       setSuggestions(getRecentAddresses());
       setIsSearching(false);
@@ -206,7 +215,8 @@ export const YourRoute: React.FC<YourRouteProps> = ({ onRouteComplete }) => {
     const requestId = ++searchRequestRef.current;
     setIsSearching(true);
     try {
-      const userLocation = geoLat && geoLng ? { lat: geoLat, lng: geoLng } : undefined;
+      const { lat: gLat, lng: gLng } = geoRef.current;
+      const userLocation = gLat && gLng ? { lat: gLat, lng: gLng } : undefined;
       const results = await searchAddresses(query, userLocation);
       if (requestId === searchRequestRef.current) setSuggestions(results);
     } catch (error) {
@@ -215,7 +225,7 @@ export const YourRoute: React.FC<YourRouteProps> = ({ onRouteComplete }) => {
     } finally {
       if (requestId === searchRequestRef.current) setIsSearching(false);
     }
-  }, [geoLat, geoLng]);
+  }, []);
 
   // Handle search query changes with debounce
   useEffect(() => {
@@ -225,7 +235,7 @@ export const YourRoute: React.FC<YourRouteProps> = ({ onRouteComplete }) => {
 
     searchTimerRef.current = setTimeout(() => {
       searchForAddresses(searchQuery);
-    }, 300);
+    }, 400);
 
     return () => {
       if (searchTimerRef.current) {
@@ -733,21 +743,18 @@ navigate('/select-ride', {
             <div className="space-y-2 mt-6">
               {/* Show loading indicator if searching */}
               {isSearching && (
-                <div className="flex items-center justify-center py-4">
-                  <Loader2 className="text-[#5B2EFF] animate-spin mr-2" size={20} />
-                  <span className="text-gray-500 dark:text-gray-400 text-sm">Searching...</span>
+                <div className="flex items-center justify-center py-1">
+                  <Loader2 className="text-[#5B2EFF] animate-spin mr-2" size={14} />
+                  <span className="text-gray-500 dark:text-gray-400 text-xs">Searching...</span>
                 </div>
               )}
 
               {/* Show suggestions */}
-              {!isSearching && suggestions.map((suggestion, index) => (
+              {suggestions.map((suggestion) => (
                 <motion.button
                   key={suggestion.id}
                   onClick={() => handleSuggestionSelect(suggestion)}
                   className="w-full flex items-center space-x-3 p-3 hover:bg-gray-50 dark:hover:bg-gray-800 rounded-lg transition-colors text-left"
-                  initial={{ opacity: 0, x: -20 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ delay: index * 0.05 }}
                   whileTap={{ scale: 0.98 }}
                 >
                   <Clock className="text-gray-400 dark:text-gray-500 flex-shrink-0" size={20} />
@@ -778,9 +785,6 @@ navigate('/select-ride', {
                     }
                   }}
                   className="w-full flex items-center space-x-3 p-3 hover:bg-gray-50 dark:hover:bg-gray-800 rounded-lg transition-colors text-left"
-                  initial={{ opacity: 0, x: -20 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ delay: suggestions.length * 0.05 }}
                   whileTap={{ scale: 0.98 }}
                 >
                   <Navigation className="text-[#5B2EFF] flex-shrink-0" size={20} />

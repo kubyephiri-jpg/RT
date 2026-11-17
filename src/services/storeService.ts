@@ -7,10 +7,14 @@ export const fetchStores = async (): Promise<Store[]> => {
   const storesRef = collection(db, 'stores');
   const snapshot = await getDocs(storesRef);
   
-  const stores = snapshot.docs.map(doc => ({
-    id: doc.id,
-    ...doc.data()
-  })) as Store[];
+  const stores = snapshot.docs.map(doc => {
+    const data = doc.data() as any;
+    // Accept location saved as {lat,lng} or {latitude,longitude}; always hand the app {lat,lng}.
+    const lat = Number(data?.location?.lat ?? data?.location?.latitude);
+    const lng = Number(data?.location?.lng ?? data?.location?.longitude);
+    const location = Number.isFinite(lat) && Number.isFinite(lng) && !(lat === 0 && lng === 0) ? { lat, lng } : undefined;
+    return { id: doc.id, ...data, location };
+  }) as Store[];
   
   return stores;
 };

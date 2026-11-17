@@ -109,25 +109,34 @@ export function FoodiesRoute() {
   }, []);
 
   // Debounced search for addresses
+  const geoRef = useRef<{ lat: number | null | undefined; lng: number | null | undefined }>({ lat: geoLat, lng: geoLng });
+  geoRef.current = { lat: geoLat, lng: geoLng };
+  const searchRequestRef = useRef(0);
+  const lastSearchedRef = useRef<string | null>(null);
   const searchForAddresses = useCallback(async (query: string) => {
+    const trimmed = (query || '').trim();
+    if (lastSearchedRef.current === trimmed) return; // same text: do not search again
+    lastSearchedRef.current = trimmed;
     if (!query || query.trim().length < 2) {
       setAddressSuggestions(getRecentAddresses());
       setIsSearching(false);
       return;
     }
 
+    const requestId = ++searchRequestRef.current;
     setIsSearching(true);
     try {
-      const userLocation = geoLat && geoLng ? { lat: geoLat, lng: geoLng } : undefined;
+      const { lat: gLat, lng: gLng } = geoRef.current;
+      const userLocation = gLat && gLng ? { lat: gLat, lng: gLng } : undefined;
       const results = await searchAddresses(query, userLocation);
-      setAddressSuggestions(results);
+      if (requestId === searchRequestRef.current) setAddressSuggestions(results); // ignore late answers
     } catch (error) {
       console.error('Search error:', error);
-      setAddressSuggestions(getRecentAddresses());
+      if (requestId === searchRequestRef.current) setAddressSuggestions(getRecentAddresses());
     } finally {
-      setIsSearching(false);
+      if (requestId === searchRequestRef.current) setIsSearching(false);
     }
-  }, [geoLat, geoLng]);
+  }, []);
 
   // Handle search query changes with debounce
   const handleSearchDebounce = useCallback((query: string) => {
@@ -136,7 +145,7 @@ export function FoodiesRoute() {
     }
     searchTimerRef.current = setTimeout(() => {
       searchForAddresses(query);
-    }, 300);
+    }, 400);
   }, [searchForAddresses]);
 
   // Auto-fill the delivery location with the device's current address.

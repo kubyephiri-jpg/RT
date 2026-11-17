@@ -353,6 +353,18 @@ const createArrivalCard = (arrivalTime: string): HTMLElement => {
 const isNum = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n);
 const validLL = (p: any): p is { lat: number; lng: number } => !!p && isNum(p.lat) && isNum(p.lng);
 
+const toRad = (d: number) => (d * Math.PI) / 180;
+const distMeters = (aLat: number, aLng: number, bLat: number, bLng: number) => {
+  const x = toRad(bLng - aLng) * Math.cos(toRad((aLat + bLat) / 2));
+  const y = toRad(bLat - aLat);
+  return Math.sqrt(x * x + y * y) * 6371000;
+};
+const bearingDeg = (aLat: number, aLng: number, bLat: number, bLng: number) => {
+  const y = Math.sin(toRad(bLng - aLng)) * Math.cos(toRad(bLat));
+  const x = Math.cos(toRad(aLat)) * Math.sin(toRad(bLat)) - Math.sin(toRad(aLat)) * Math.cos(toRad(bLat)) * Math.cos(toRad(bLng - aLng));
+  return ((Math.atan2(y, x) * 180) / Math.PI + 360) % 360;
+};
+
 export const MapLibreMap: React.FC<MapLibreMapProps> = ({
   center = { lat: -15.3875, lng: 28.3228 }, // Lusaka fallback while location is unavailable
   zoom = 13,
@@ -378,6 +390,8 @@ export const MapLibreMap: React.FC<MapLibreMapProps> = ({
   const markersRef = useRef<{ [key: string]: maplibregl.Marker }>({});
   const markerAnimationFramesRef = useRef<{ [key: string]: number }>({});
   const driverMarkerRef = useRef<maplibregl.Marker | null>(null);
+  const routeCoordsRef = useRef<[number, number][]>([]); // [lat, lng] of the line being drawn
+  const vehicleAngleRef = useRef<number | null>(null);
   const etaBubbleRef = useRef<maplibregl.Marker | null>(null);
   const arrivalCardRef = useRef<maplibregl.Marker | null>(null);
   const routeFitKeyRef = useRef<string | null>(null);
@@ -631,6 +645,7 @@ export const MapLibreMap: React.FC<MapLibreMapProps> = ({
     if (!m || !isMapLoaded) return;
 
     const removeRoute = () => {
+      routeCoordsRef.current = [];
       try { if (m.getLayer('route-line')) m.removeLayer('route-line'); } catch { /* already gone */ }
       try { if (m.getSource('route')) m.removeSource('route'); } catch { /* already gone */ }
     };
@@ -644,6 +659,7 @@ export const MapLibreMap: React.FC<MapLibreMapProps> = ({
     try {
       const decoded = polyline.decode(encodedPolyline);
       const coordinates = decoded.map(([lat, lng]) => [lng, lat]);
+      routeCoordsRef.current = decoded.map(([lat, lng]) => [lat, lng] as [number, number]);
       if (coordinates.length < 2) {
         removeRoute();
         return;
@@ -689,6 +705,31 @@ export const MapLibreMap: React.FC<MapLibreMapProps> = ({
     }
   }, [encodedPolyline, isMapLoaded]);
 
+  // Turn the vehicle to face where it is going: along the remaining route when there is one,
+  // otherwise along its last movement.
+  const rotateVehicle = (fromLat: number, fromLng: number, toLat: number, toLng: number) => {
+    const img = driverMarkerRef.current?.getElement().querySelector('img') as HTMLImageElement | null;
+    if (!img) return;
+    let target: number | null = null;
+    const route = routeCoordsRef.current;
+    for (let i = 0; i < route.length; i++) {
+      if (distMeters(toLat, toLng, route[i][0], route[i][1]) > 8) {
+        target = bearingDeg(toLat, toLng, route[i][0], route[i][1]);
+        break;
+      }
+    }
+    if (target === null && distMeters(fromLat, fromLng, toLat, toLng) > 4) {
+      target = bearingDeg(fromLat, fromLng, toLat, toLng);
+    }
+    if (target === null) return;
+    const prev = vehicleAngleRef.current;
+    // Take the shortest way round so the car never spins the long way.
+    const next = prev === null ? target : prev + ((((target - prev) % 360) + 540) % 360) - 180;
+    vehicleAngleRef.current = next;
+    img.style.transition = 'transform 0.4s ease-out';
+    img.style.transform = `rotate(${next}deg)`;
+  };
+
   // Update driver marker with smooth animation
   useEffect(() => {
     if (!map.current || !isMapLoaded || !validLL(driverPosition)) return;
@@ -697,6 +738,7 @@ export const MapLibreMap: React.FC<MapLibreMapProps> = ({
       // Animate existing marker
       const currentPos = driverMarkerRef.current.getLngLat();
       const newPos = new maplibregl.LngLat(driverPosition.lng, driverPosition.lat);
+      rotateVehicle(currentPos.lat, currentPos.lng, newPos.lat, newPos.lng);
       
       // Smooth interpolation
       let start: number | null = null;
@@ -728,6 +770,7 @@ export const MapLibreMap: React.FC<MapLibreMapProps> = ({
       driverMarkerRef.current = new maplibregl.Marker({ element: el })
         .setLngLat([driverPosition.lng, driverPosition.lat])
         .addTo(map.current);
+      rotateVehicle(driverPosition.lat, driverPosition.lng, driverPosition.lat, driverPosition.lng);
     }
   }, [driverPosition, isMapLoaded, onDriverMove, vehicleType, vehicleColor]);
 

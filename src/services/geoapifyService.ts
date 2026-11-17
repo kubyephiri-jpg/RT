@@ -148,7 +148,7 @@ export const searchAddresses = async (
     const features = [...(geocodeData?.features || []), ...(placesData?.features || [])];
     if (!features.length) return getRecentAddresses();
 
-    const addresses = features.map((feature, index) => {
+    const addresses = features.map((feature) => {
       const props = feature.properties;
       const descriptionParts: string[] = [];
       if (props.city) descriptionParts.push(props.city);
@@ -158,7 +158,7 @@ export const searchAddresses = async (
         ? undefined
         : props.distance < 1000 ? `${Math.round(props.distance)} m` : `${(props.distance / 1000).toFixed(1)} km`;
       return {
-        id: props.place_id || `geoapify-${index}-${Date.now()}`,
+        id: props.place_id || `geo-${Number(props.lat).toFixed(5)}-${Number(props.lon).toFixed(5)}`,
         address: props.formatted || props.address_line1 || query,
         description: descriptionParts.join(', ') || 'Zambia and South Africa',
         distance,
