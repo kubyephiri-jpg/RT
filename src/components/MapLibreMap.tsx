@@ -9,7 +9,7 @@ import * as maplibregl from 'maplibre-gl';
 import maplibreWorkerUrl from '../maplibre-worker?worker&url';
 import polyline from '@mapbox/polyline';
 import 'maplibre-gl/dist/maplibre-gl.css';
-import { getDriverVehicleIcon } from '../utils/vehicleIconHelper';
+import { getDriverVehicleIcon, vehicleIconUrl } from '../utils/vehicleIconHelper';
 
 maplibregl.setWorkerUrl(maplibreWorkerUrl);
 
@@ -23,6 +23,8 @@ export interface MapMarker {
   label?: string;
   vehicleType?: string;
   vehicleColor?: string;
+  // exact picture name from the driver's registration, e.g. 'abicyclebl'
+  vehicleIcon?: string;
 }
 
 export interface RoutePolyline {
@@ -67,6 +69,7 @@ interface MapLibreMapProps {
   vehicleType?: 'bicycle' | 'motorbike' | 'car' | 'bus' | 'truck' | string;
   // Driver's registered vehicle color (e.g. 'red', 'white', 'blue')
   vehicleColor?: string;
+  vehicleIcon?: string;
   onMapIdle?: (center: { lat: number; lng: number }) => void;
   onEtaBubbleClick?: () => void;
   onArrivalCardClick?: () => void;
@@ -91,13 +94,14 @@ const vehicleIconMap: Record<string, string> = {
   refrigerated_truck: '/cars/refrigerated_truck.png',
 };
 
-const getVehicleIconUrl = (vehicleType?: string, vehicleColor?: string): string => {
+const getVehicleIconUrl = (vehicleType?: string, vehicleColor?: string, vehicleIcon?: string): string => {
+  if (vehicleIcon) return vehicleIconUrl(vehicleIcon);
   if (vehicleColor) return getDriverVehicleIcon(vehicleType || 'car', vehicleColor);
   return vehicleIconMap[(vehicleType || '').toLowerCase()] || '/cars/acarg.png';
 };
 
 // Create the animated driver vehicle marker (replaces the bubble at the polyline start).
-const createVehicleElement = (vehicleType?: string, vehicleColor?: string): HTMLElement => {
+const createVehicleElement = (vehicleType?: string, vehicleColor?: string, vehicleIcon?: string): HTMLElement => {
   const el = document.createElement('div');
   el.className = 'maplibre-vehicle-marker';
   el.innerHTML = `
@@ -110,7 +114,7 @@ const createVehicleElement = (vehicleType?: string, vehicleColor?: string): HTML
       filter: drop-shadow(0 3px 6px rgba(0,0,0,0.35));
       transition: transform 0.3s ease;
     ">
-      <img src="${getVehicleIconUrl(vehicleType, vehicleColor)}" alt="vehicle" style="
+      <img src="${getVehicleIconUrl(vehicleType, vehicleColor, vehicleIcon)}" alt="vehicle" style="
         width: 44px;
         height: 44px;
         object-fit: contain;
@@ -379,6 +383,7 @@ export const MapLibreMap: React.FC<MapLibreMapProps> = ({
   storePosition,
   vehicleType,
   vehicleColor,
+  vehicleIcon,
   onMapIdle,
   onEtaBubbleClick,
   onArrivalCardClick,
@@ -607,7 +612,7 @@ export const MapLibreMap: React.FC<MapLibreMapProps> = ({
       } else {
         // Create new marker
         const el = marker.type === 'driver'
-          ? createVehicleElement(marker.vehicleType, marker.vehicleColor)
+          ? createVehicleElement(marker.vehicleType, marker.vehicleColor, marker.vehicleIcon)
           : createMarkerElement(marker.type, marker.label);
         const newMarker = new maplibregl.Marker({ element: el })
           .setLngLat([marker.lng, marker.lat])
@@ -766,20 +771,20 @@ export const MapLibreMap: React.FC<MapLibreMapProps> = ({
       requestAnimationFrame(animate);
     } else {
       // Create new animated vehicle marker (icon based on vehicleType + color)
-      const el = createVehicleElement(vehicleType, vehicleColor);
+      const el = createVehicleElement(vehicleType, vehicleColor, vehicleIcon);
       driverMarkerRef.current = new maplibregl.Marker({ element: el })
         .setLngLat([driverPosition.lng, driverPosition.lat])
         .addTo(map.current);
       rotateVehicle(driverPosition.lat, driverPosition.lng, driverPosition.lat, driverPosition.lng);
     }
-  }, [driverPosition, isMapLoaded, onDriverMove, vehicleType, vehicleColor]);
+  }, [driverPosition, isMapLoaded, onDriverMove, vehicleType, vehicleColor, vehicleIcon]);
 
   // Swap the vehicle icon image when vehicleType or vehicleColor changes (without recreating the marker)
   useEffect(() => {
     if (!driverMarkerRef.current) return;
     const img = driverMarkerRef.current.getElement().querySelector('img');
-    if (img) img.setAttribute('src', getVehicleIconUrl(vehicleType, vehicleColor));
-  }, [vehicleType, vehicleColor]);
+    if (img) img.setAttribute('src', getVehicleIconUrl(vehicleType, vehicleColor, vehicleIcon));
+  }, [vehicleType, vehicleColor, vehicleIcon]);
 
   // Update ETA bubble
   useEffect(() => {

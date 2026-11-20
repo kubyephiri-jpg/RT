@@ -1,4 +1,5 @@
 import React, { useRef, useEffect } from 'react';
+import { NO_POSTER } from '../utils/videoPoster';
 
 interface SplashScreenProps {
   onComplete: () => void;
@@ -40,6 +41,7 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ onComplete }) => {
         className="w-full h-full object-cover"
         muted
         playsInline
+        poster={NO_POSTER}
         preload="auto"
         style={{ display: 'block' }}
       />

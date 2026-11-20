@@ -63,6 +63,7 @@ export interface OnlineDriver {
   driverId: string;
   vehicleCategory: string;
   vehicleColor?: string;
+  vehicleIcon?: string;
   isOnline: boolean;
   isBusy: boolean;
   location?: {
@@ -272,6 +273,7 @@ class RideService {
                 driverId,
                 vehicleCategory: driver.vehicleCategory || '',
                 vehicleColor: driver.color || driver.vehicleColor || driver.vehicle?.color || undefined,
+                vehicleIcon: driver.vehicleIcon || undefined,
                 isOnline: driver.isOnline,
                 isBusy: driver.isBusy
               });

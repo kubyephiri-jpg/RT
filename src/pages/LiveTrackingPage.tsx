@@ -609,6 +609,7 @@ export const LiveTrackingPage: React.FC = () => {
           storePosition={toLL(orderData.storeLocation) || undefined}
           vehicleType={(orderData as any)?.vehicleType || driverData?.vehicle?.type || 'car'}
           vehicleColor={(driverFromOrder?.color || driverData?.vehicle?.color)}
+          vehicleIcon={(driverFromOrder?.vehicleIcon) || undefined}
           arrivalTime={showRouteOverlay && etaMinutes !== null ? (getArrivalTime() || undefined) : undefined}
           fitBounds={mapMarkers.length > 1}
           className="w-full h-full"

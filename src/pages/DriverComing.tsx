@@ -58,6 +58,7 @@ interface DriverInfo {
   carModel: string;
   carImage?: string; // Vehicle photo
   vehicleColor?: string; // Registered vehicle color for icon lookup
+  vehicleIcon?: string; // exact picture name saved by the backend, e.g. 'abicyclebl'
   eta: string;
   photo: string;
   phone?: string; // Driver phone for call button
@@ -243,6 +244,7 @@ export const DriverComing: React.FC<DriverComingProps> = ({
           // Use carImage from Firestore for vehicle photo
           carImage: driverFromOrder.carImage || driverFromOrder.vehicleImage || '',
           vehicleColor: driverFromOrder.color || driverFromOrder.vehicle?.color || '',
+          vehicleIcon: driverFromOrder.vehicleIcon || '',
           eta: '',
           // Use profilePicture from Firestore
           photo: driverFromOrder.profilePicture || driverFromOrder.profileImage || driverFromOrder.photo || '',
@@ -527,6 +529,7 @@ export const DriverComing: React.FC<DriverComingProps> = ({
           driverPosition={driverLocation || undefined}
           vehicleType={(firestoreRideData as any)?.vehicleType || (firestoreRideData as any)?.deliveryMode?.type || (orderData as any)?.deliveryMode?.type || 'car'}
           vehicleColor={driverInfo?.vehicleColor}
+          vehicleIcon={(driverInfo as any)?.vehicleIcon || undefined}
           polyline={showRouteOverlay ? (trimmedPolyline ?? undefined) : undefined}
           arrivalTime={showRouteOverlay ? (getArrivalTime() || undefined) : undefined}
           fitBounds={mapMarkers.length > 1}
