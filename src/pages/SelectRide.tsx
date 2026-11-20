@@ -103,7 +103,7 @@ export const SelectRide: React.FC<SelectRideProps> = ({
   const [error, setError] = useState('');
   const [selectedRide, setSelectedRide] = useState<BackendRideOption | null>(null);
   const [routePolyline, setRoutePolyline] = useState<string | null>(null);
-  const nearbyDrivers = useNearbyDrivers(effectivePickupCoords?.lat ?? null, effectivePickupCoords?.lng ?? null);
+  const nearbyDrivers = useNearbyDrivers(effectivePickupCoords?.lat ?? null, effectivePickupCoords?.lng ?? null, serviceType === 'ride' ? 'ride' : 'delivery');
 
   // Promo discount (30%)
   const promoDiscount = 30;
@@ -443,7 +443,7 @@ export const SelectRide: React.FC<SelectRideProps> = ({
   const getArrivalTime = useCallback(() => {
     if (!selectedRide?.eta) return null;
     const now = new Date();
-    const arrivalDate = new Date(now.getTime() + (selectedRide.eta + 15) * 60000);
+    const arrivalDate = new Date(now.getTime() + (selectedRide.eta + ((selectedRide as any).durationMinutes ?? 15)) * 60000);
     return arrivalDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
   }, [selectedRide]);
 

@@ -77,7 +77,7 @@ export function FoodDelivery() {
   const [error, setError] = useState('');
   const [selectedOption, setSelectedOption] = useState<BackendRideOption | null>(null);
   const [routePolyline, setRoutePolyline] = useState<string | null>(null);
-  const nearbyDrivers = useNearbyDrivers(latitude, longitude);
+  const nearbyDrivers = useNearbyDrivers(latitude, longitude, 'delivery');
 
   const [selectedFilter, setSelectedFilter] = useState<FilterTab>('standard');
   const [profileToggle, setProfileToggle] = useState<'personal' | 'business'>('personal');
@@ -507,7 +507,7 @@ navigate('/confirm-order', {
   const getArrivalTime = useCallback(() => {
     if (!selectedOption?.eta) return null;
     const now = new Date();
-    const arrivalDate = new Date(now.getTime() + (selectedOption.eta + 10) * 60000);
+    const arrivalDate = new Date(now.getTime() + (selectedOption.eta + ((selectedOption as any).durationMinutes ?? 10)) * 60000);
     return arrivalDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
   }, [selectedOption]);
 

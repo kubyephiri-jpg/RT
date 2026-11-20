@@ -405,35 +405,47 @@ export const ScheduleRide: React.FC = () => {
               </h3>
               
               <div className="flex items-center justify-center space-x-4 mb-8">
-                {/* Hour Picker */}
+                {/* Hour Picker: 00 - 23 only, wraps around */}
                 <div className="text-center">
-                  <div className="border-2 border-[#5B2EFF] rounded-lg p-4 mb-2">
+                  <button type="button" aria-label="More hours" onClick={() => setSelectedHour((h) => (h + 1) % 24)} className="text-[#5B2EFF] text-xl leading-none px-3 py-1">▲</button>
+                  <div className="border-2 border-[#5B2EFF] rounded-lg p-4 my-1">
                     <input
-                      type="number"
-                      min="0"
-                      max="23"
-                      value={selectedHour}
-                      onChange={(e) => setSelectedHour(parseInt(e.target.value) || 0)}
+                      type="text"
+                      inputMode="numeric"
+                      maxLength={2}
+                      value={String(selectedHour).padStart(2, '0')}
+                      onFocus={(e) => e.currentTarget.select()}
+                      onChange={(e) => {
+                        const digits = e.target.value.replace(/\D/g, '').slice(-2);
+                        setSelectedHour(Math.min(23, parseInt(digits || '0', 10)));
+                      }}
                       className="text-4xl font-light text-center w-16 bg-transparent outline-none text-gray-900 dark:text-white"
                     />
                   </div>
+                  <button type="button" aria-label="Fewer hours" onClick={() => setSelectedHour((h) => (h + 23) % 24)} className="text-[#5B2EFF] text-xl leading-none px-3 py-1">▼</button>
                   <div className="text-sm text-gray-500 dark:text-gray-400">Hour</div>
                 </div>
 
                 <div className="text-4xl font-light text-gray-400 dark:text-gray-500">:</div>
 
-                {/* Minute Picker */}
+                {/* Minute Picker: 00 - 59 only, wraps around */}
                 <div className="text-center">
-                  <div className="bg-gray-100 dark:bg-gray-800 rounded-lg p-4 mb-2">
+                  <button type="button" aria-label="More minutes" onClick={() => setSelectedMinute((m) => (m + 1) % 60)} className="text-[#5B2EFF] text-xl leading-none px-3 py-1">▲</button>
+                  <div className="bg-gray-100 dark:bg-gray-800 rounded-lg p-4 my-1">
                     <input
-                      type="number"
-                      min="0"
-                      max="59"
-                      value={selectedMinute}
-                      onChange={(e) => setSelectedMinute(parseInt(e.target.value) || 0)}
+                      type="text"
+                      inputMode="numeric"
+                      maxLength={2}
+                      value={String(selectedMinute).padStart(2, '0')}
+                      onFocus={(e) => e.currentTarget.select()}
+                      onChange={(e) => {
+                        const digits = e.target.value.replace(/\D/g, '').slice(-2);
+                        setSelectedMinute(Math.min(59, parseInt(digits || '0', 10)));
+                      }}
                       className="text-4xl font-light text-center w-16 bg-transparent outline-none text-gray-900 dark:text-white"
                     />
                   </div>
+                  <button type="button" aria-label="Fewer minutes" onClick={() => setSelectedMinute((m) => (m + 59) % 60)} className="text-[#5B2EFF] text-xl leading-none px-3 py-1">▼</button>
                   <div className="text-sm text-gray-500 dark:text-gray-400">Minute</div>
                 </div>
               </div>

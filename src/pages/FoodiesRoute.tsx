@@ -7,13 +7,7 @@ import { useGeolocation } from '../hooks/useGeolocation';
 import { fetchStoreById, fetchStoresByCategory, fetchProductsByStore, isStoreOpen } from '../services/storeService';
 import { brandKeyOf, DEFAULT_ITEM_KG, parseUnitToKg, Product } from '../data/storesData';
 import { haversineDistanceKm } from '../utils/geoUtils';
-import { 
-  searchAddresses, 
-  getRecentAddresses, 
-  saveRecentAddress, 
-  reverseGeocode,
-  GeoapifyAddress 
-} from '../services/geoapifyService';
+import { searchAddresses, getRecentAddresses, saveRecentAddress, GeoapifyAddress } from '../services/geoapifyService';
 
 interface Stop {
   id: string;
@@ -153,44 +147,56 @@ export function FoodiesRoute() {
   // the shared context address, and falls back to a direct geocode (and then
   // raw coordinates) so a transient failure can never leave the box empty.
   // We only mark it auto-filled once a value has actually been placed.
+  // true while the box still holds the automatic "current location" (so we keep it live)
+  const followCurrentRef = useRef(false);
+  const nearSame = (a: { lat: number; lng: number } | null, lat: number, lng: number) =>
+    !!a && Math.hypot((a.lat - lat) * 111320, (a.lng - lng) * 111320 * Math.cos((lat * Math.PI) / 180)) < 8;
+
   useEffect(() => {
-    if (deliveryLocation) {
+    if (deliveryLocation && !followCurrentRef.current) {
       if (!currentLocationQuery) setCurrentLocationQuery(deliveryLocation);
       return;
     }
-    if (geoLat === null || geoLng === null || hasAutoFilled) {
+    if (geoLat === null || geoLng === null) return;
+
+    // Fill at once with the best we have; the address text is upgraded as soon as it resolves.
+    if (!hasAutoFilled) {
+      followCurrentRef.current = true;
+      const text = currentLocation || 'Current location';
+      setDeliveryLocation(text);
+      setCurrentLocationQuery(text);
+      setDeliveryCoords({ lat: geoLat, lng: geoLng });
+      setHasAutoFilled(true);
       return;
     }
 
-    let cancelled = false;
-
-    const fillDelivery = async () => {
-      // 1. Prefer the address already resolved by the global LocationContext.
+    // Keep following the phone while the box still holds the automatic value.
+    if (followCurrentRef.current) {
       if (currentLocation) {
         setDeliveryLocation(currentLocation);
         setCurrentLocationQuery(currentLocation);
-        setDeliveryCoords({ lat: geoLat, lng: geoLng });
-        setHasAutoFilled(true);
-        return;
       }
-
-      // 2. Otherwise resolve the coordinates directly via Geoapify.
-      const result = await reverseGeocode(geoLat, geoLng);
-      if (cancelled) return;
-
-      const resolved = result?.address ?? `${geoLat.toFixed(5)}, ${geoLng.toFixed(5)}`;
-      setDeliveryLocation(resolved);
-      setCurrentLocationQuery(resolved);
-      setDeliveryCoords({ lat: geoLat, lng: geoLng });
-      setHasAutoFilled(true);
-    };
-
-    void fillDelivery();
-
-    return () => {
-      cancelled = true;
-    };
+      setDeliveryCoords((prev) => (nearSame(prev, geoLat, geoLng) ? prev : { lat: geoLat, lng: geoLng }));
+    }
   }, [geoLat, geoLng, currentLocation, deliveryLocation, hasAutoFilled, currentLocationQuery]);
+
+  // Tapping "Use current location": text AND coordinates come from the phone, and it keeps following.
+  const handleUseCurrentLocation = () => {
+    if (geoLat == null || geoLng == null) return;
+    const text = currentLocation || 'Current location';
+    followCurrentRef.current = true;
+    setDeliveryLocation(text);
+    setCurrentLocationQuery(text);
+    setDeliveryCoords({ lat: geoLat, lng: geoLng });
+    setShowRecentAddresses(true);
+    setActiveLocationInput('current-location');
+    if (stops.length > 0 && !stops[0].address) {
+      setTimeout(() => {
+        setActiveLocationInput(stops[0].id);
+        stopInputRefs.current[stops[0].id]?.focus();
+      }, 100);
+    }
+  };
 
 
   useEffect(() => {
@@ -211,6 +217,7 @@ export function FoodiesRoute() {
   }, [location.state]);
 
   const handleCurrentLocationChange = (value: string) => {
+    followCurrentRef.current = false;
     setCurrentLocationQuery(value);
     setDeliveryLocation(value);
     // Keep the suggestions panel visible while typing so live address results
@@ -220,6 +227,7 @@ export function FoodiesRoute() {
   };
 
   const handleCurrentLocationSelect = (address: string) => {
+    followCurrentRef.current = false;
     setDeliveryLocation(address);
     setCurrentLocationQuery(address);
     setShowRecentAddresses(true);
@@ -236,6 +244,7 @@ export function FoodiesRoute() {
   const handleClearCurrentLocation = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
+    followCurrentRef.current = false;
     setCurrentLocationQuery('');
     setDeliveryLocation('');
     setShowRecentAddresses(true);
@@ -665,18 +674,19 @@ export function FoodiesRoute() {
               </div>
             )}
 
-            {currentLocationQuery === '' && currentLocation && activeLocationInput === 'current-location' && (
+            {activeLocationInput === 'current-location' && (
               <motion.button
-                onClick={() => handleCurrentLocationSelect(currentLocation)}
-                className="w-full flex items-center gap-3 p-3 bg-purple-50 dark:bg-purple-900/20 rounded-lg hover:bg-purple-100 dark:hover:bg-purple-900/30 transition-colors shadow-sm border border-purple-200 dark:border-purple-800"
+                disabled={geoLat == null || geoLng == null}
+                onClick={handleUseCurrentLocation}
+                className="w-full flex items-center gap-3 p-3 bg-purple-50 dark:bg-purple-900/20 rounded-lg hover:bg-purple-100 dark:hover:bg-purple-900/30 transition-colors shadow-sm border border-purple-200 dark:border-purple-800 disabled:opacity-60"
                 whileTap={{ scale: 0.98 }}
               >
                 <div className="w-10 h-10 bg-purple-500 rounded-full flex items-center justify-center flex-shrink-0">
-                  <Clock size={16} className="text-white" />
+                  {geoLat == null ? <Loader2 size={16} className="text-white animate-spin" /> : <Navigation size={16} className="text-white" />}
                 </div>
                 <div className="flex-1 text-left">
-                  <p className="font-medium text-gray-900 dark:text-white text-xs">Current location</p>
-                  <p className="text-[10px] text-gray-600 dark:text-gray-400">{currentLocation.split(',')[0]}</p>
+                  <p className="font-medium text-gray-900 dark:text-white text-xs">{geoLat == null ? 'Getting your location…' : 'Use current location'}</p>
+                  {currentLocation && <p className="text-[10px] text-gray-600 dark:text-gray-400">{currentLocation.split(',')[0]}</p>}
                 </div>
               </motion.button>
             )}

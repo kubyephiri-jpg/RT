@@ -108,10 +108,12 @@ export const LocationProvider: React.FC<LocationProviderProps> = ({ children }) 
   // browser routinely emits while a live watch is running — those should never
   // flip the UI back to a "Location is off" state once we already have a fix.
   const hadFixRef = useRef(false);
+  const lastAccRef = useRef<number>(Infinity);
+  const lastFixAtRef = useRef<number>(0);
 
   // Throttled reverse geocoding: only hit the API when the user has moved a
   // meaningful distance or enough time has passed since the last lookup.
-  const maybeReverseGeocode = useCallback(async (lat: number, lng: number) => {
+  const maybeReverseGeocode = useCallback(async (lat: number, lng: number, force = false) => {
     const now = Date.now();
     const last = lastGeocodeCoordsRef.current;
     const movedKm = last ? calculateDistance(last.lat, last.lng, lat, lng) : Infinity;
@@ -120,7 +122,9 @@ export const LocationProvider: React.FC<LocationProviderProps> = ({ children }) 
     const shouldGeocode =
       !addressRef.current ||
       movedKm >= GEOCODE_DISTANCE_THRESHOLD_KM ||
-      elapsed >= GEOCODE_TIME_THROTTLE_MS;
+      elapsed >= GEOCODE_TIME_THROTTLE_MS ||
+      // a clearly better GPS fix arrived: re-resolve the address even if we have not moved far
+      (force && elapsed >= 2000);
 
     if (!shouldGeocode || geocodeInFlightRef.current) return;
 
@@ -147,6 +151,14 @@ export const LocationProvider: React.FC<LocationProviderProps> = ({ children }) 
 
   const handleSuccess = useCallback((position: GeolocationPosition) => {
     const { latitude: lat, longitude: lng, accuracy: acc } = position.coords;
+    const nowMs = Date.now();
+    // Ignore a much WORSE fix (e.g. a cell-tower guess) that arrives right after a good one.
+    if (hadFixRef.current && acc && acc > 150 && acc > lastAccRef.current * 2 && nowMs - lastFixAtRef.current < 20000) {
+      return;
+    }
+    const improved = !!acc && acc < lastAccRef.current * 0.5;
+    lastAccRef.current = acc || Infinity;
+    lastFixAtRef.current = nowMs;
     hadFixRef.current = true;
     setLatitude(lat);
     setLongitude(lng);
@@ -155,7 +167,7 @@ export const LocationProvider: React.FC<LocationProviderProps> = ({ children }) 
     setGpsEnabled(true);
     setLoading(false);
     setError(null);
-    void maybeReverseGeocode(lat, lng);
+    void maybeReverseGeocode(lat, lng, improved);
   }, [maybeReverseGeocode]);
 
   const handleError = useCallback((err: GeolocationPositionError) => {

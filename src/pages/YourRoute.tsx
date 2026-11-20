@@ -6,14 +6,7 @@ import { MapLibreMap, MapMarker } from '../components/MapLibreMap';
 import { ScrollableSection } from '../components/ScrollableSection';
 import { apiPost } from '../config/api';
 import { useGeolocation } from '../hooks/useGeolocation';
-import { 
-  searchAddresses, 
-  getRecentAddresses, 
-  saveRecentAddress, 
-  reverseGeocode,
-  GeoapifyAddress,
-  RECENT_ADDRESSES_UPDATED_EVENT
-} from '../services/geoapifyService';
+import { searchAddresses, getRecentAddresses, saveRecentAddress, GeoapifyAddress, RECENT_ADDRESSES_UPDATED_EVENT } from '../services/geoapifyService';
 
 interface YourRouteProps {
   onRouteComplete?: (pickup: string, destination: string, stops: string[]) => void;
@@ -100,45 +93,29 @@ export const YourRoute: React.FC<YourRouteProps> = ({ onRouteComplete }) => {
   // hasn't already filled/cleared the field. We ONLY mark it as auto-filled
   // once we have actually placed a value, so a transient geocode failure can
   // never permanently leave the box empty — it will retry on the next update.
+  // true while the pick-up box still holds the automatic "current location" (so we keep it live)
+  const followCurrentRef = useRef(false);
+  const nearSame = (a: { lat: number; lng: number } | null, lat: number, lng: number) =>
+    !!a && Math.hypot((a.lat - lat) * 111320, (a.lng - lng) * 111320 * Math.cos((lat * Math.PI) / 180)) < 8;
+
   useEffect(() => {
-    if (geoLat === null || geoLng === null || pickup || hasAutoFilledPickup) {
-      return;
-    }
-
-    let cancelled = false;
-
-    const fillPickup = async () => {
-      // 1. Prefer the address already resolved by the global LocationContext.
-      if (currentLocation) {
-        setPickup(currentLocation);
-        setPickupCoords({ lat: geoLat, lng: geoLng });
-        setHasAutoFilledPickup(true);
-        return;
-      }
-
-      // 2. Otherwise resolve the coordinates directly via Geoapify.
-      const result = await reverseGeocode(geoLat, geoLng);
-      if (cancelled) return;
-
-      if (result) {
-        setPickup(result.address);
-        setPickupCoords(result.coords);
-        setHasAutoFilledPickup(true);
-        return;
-      }
-
-      // 3. Last-resort fallback: show raw coordinates so the box is never empty.
-      setPickup(`${geoLat.toFixed(5)}, ${geoLng.toFixed(5)}`);
+    if (geoLat === null || geoLng === null) return;
+    // Fill at once with the best we have; the address text is upgraded as soon as it resolves.
+    if (!hasAutoFilledPickup) {
+      if (pickup) return; // already filled from navigation
+      followCurrentRef.current = true;
+      setPickup(currentLocation || 'Current location');
       setPickupCoords({ lat: geoLat, lng: geoLng });
       setHasAutoFilledPickup(true);
-    };
+      return;
+    }
+    // Keep following the phone while the box still holds the automatic value.
+    if (followCurrentRef.current) {
+      if (currentLocation) setPickup(currentLocation);
+      setPickupCoords((prev) => (nearSame(prev, geoLat, geoLng) ? prev : { lat: geoLat, lng: geoLng }));
+    }
+  }, [geoLat, geoLng, currentLocation, hasAutoFilledPickup]);
 
-    void fillPickup();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [geoLat, geoLng, currentLocation, pickup, hasAutoFilledPickup]);
 
   useEffect(() => {
     // Handle navigation state from SelectRide page
@@ -329,6 +306,7 @@ export const YourRoute: React.FC<YourRouteProps> = ({ onRouteComplete }) => {
     let newStopCoords = [...stopCoords];
 
     if (activeField === 'pickup') {
+      followCurrentRef.current = false;
       newPickup = address;
       newPickupCoords = coords;
       setPickup(address);
@@ -419,6 +397,7 @@ navigate('/select-ride', {
 
   const handleInputChange = (value: string) => {
     if (activeField === 'pickup') {
+      followCurrentRef.current = false;
       setPickup(value);
     } else if (activeField === 'destination') {
       setDestination(value);
@@ -648,6 +627,7 @@ navigate('/select-ride', {
               ) : pickup && activeField === 'pickup' ? (
                 <button
                   onClick={() => {
+                    followCurrentRef.current = false;
                     setPickup('');
                     setPickupCoords(null);
                     setSearchQuery('');
@@ -749,6 +729,34 @@ navigate('/select-ride', {
                 </div>
               )}
 
+              {/* Use current location: always first while editing the pick-up box */}
+              {(activeField === 'pickup' || !pickup) && (
+                <motion.button
+                  disabled={geoLat == null || geoLng == null}
+                  onClick={async () => {
+                    if (geoLat == null || geoLng == null) return;
+                    const text = currentLocation || 'Current location';
+                    const coords = { lat: geoLat, lng: geoLng };
+                    handleSuggestionSelect({ id: 'current-location', address: text, description: 'Your current location', coords });
+                    followCurrentRef.current = true; // keep following the phone from now on
+                  }}
+                  className="w-full flex items-center space-x-3 p-3 bg-purple-50 dark:bg-purple-900/20 rounded-lg transition-colors text-left disabled:opacity-60"
+                  whileTap={{ scale: 0.98 }}
+                >
+                  {geoLat == null ? (
+                    <Loader2 className="text-[#5B2EFF] animate-spin flex-shrink-0" size={20} />
+                  ) : (
+                    <Navigation className="text-[#5B2EFF] flex-shrink-0" size={20} />
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <p className="font-medium text-[#5B2EFF]">{geoLat == null ? 'Getting your location…' : 'Use current location'}</p>
+                    {currentLocation && (
+                      <p className="text-sm text-gray-500 dark:text-gray-400 truncate">{currentLocation}</p>
+                    )}
+                  </div>
+                </motion.button>
+              )}
+
               {/* Show suggestions */}
               {suggestions.map((suggestion) => (
                 <motion.button
@@ -768,34 +776,6 @@ navigate('/select-ride', {
                 </motion.button>
               ))}
               
-              {/* My Location Option */}
-              {geoLat && geoLng && (
-                <motion.button
-                  onClick={async () => {
-                    const reverseResult = await reverseGeocode(geoLat, geoLng);
-                    if (reverseResult) {
-                      handleSuggestionSelect(reverseResult);
-                    } else {
-                      handleSuggestionSelect({
-                        id: 'current-location',
-                        address: currentLocation || 'Current Location',
-                        description: 'Your current location',
-                        coords: { lat: geoLat, lng: geoLng }
-                      });
-                    }
-                  }}
-                  className="w-full flex items-center space-x-3 p-3 hover:bg-gray-50 dark:hover:bg-gray-800 rounded-lg transition-colors text-left"
-                  whileTap={{ scale: 0.98 }}
-                >
-                  <Navigation className="text-[#5B2EFF] flex-shrink-0" size={20} />
-                  <div className="flex-1 min-w-0">
-                    <p className="font-medium text-[#5B2EFF]">My location</p>
-                    {currentLocation && (
-                      <p className="text-sm text-gray-500 dark:text-gray-400 truncate">{currentLocation}</p>
-                    )}
-                  </div>
-                </motion.button>
-              )}
             </div>
           </ScrollableSection>
         </div>

@@ -45,6 +45,7 @@ import { MicPermissionPrompt } from './components/MicPermissionPrompt';
 import { ActiveOrderProvider, ACTIVE_ORDER_POLICY, buildTrackingState, useActiveOrder } from './hooks/useActiveOrder';
 import { ActiveOrderGate } from './components/ActiveOrderGate';
 import { PendingRatingHost } from './components/PendingRatingHost';
+import { CartOtherStoreNotice } from './components/CartOtherStoreNotice';
 
 interface AppState {
   selectedDestination: string;
@@ -160,6 +161,7 @@ function AppContent({ userId }: { userId: string }) {
           <div className="app">
             <ActiveOrderGate isRatingModalOpen={isPendingRatingOpen} />
             <PendingRatingHost onOpenChange={setIsPendingRatingOpen} />
+            <CartOtherStoreNotice />
             {pushToast && (
               <div className="fixed top-4 left-1/2 z-50 w-[calc(100%-2rem)] max-w-sm -translate-x-1/2 rounded-xl bg-gray-900 px-4 py-3 text-white shadow-lg" role="status">
                 <p className="font-semibold">{pushToast.title}</p>
