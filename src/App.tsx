@@ -3,7 +3,7 @@ import { BrowserRouter as Router, Routes, Route, useNavigate, useLocation } from
 import { AnimatePresence, motion } from 'framer-motion';
 import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
 import { auth } from './config/firebase';
-import { reconcileRecentAddresses } from './services/geoapifyService';
+import { reconcileRecentAddresses, setSavedPlacesSuggestions } from './services/geoapifyService';
 import { SplashScreen } from './pages/SplashScreen';
 import { Login } from './pages/Login';
 import { Dashboard } from './pages/Dashboard';
@@ -64,6 +64,10 @@ function AppContent({ userId }: { userId: string }) {
   }, [userId]);
   const location = useLocation();
   const { profile } = useUserProfile(userId);
+  // keep the saved places (Home, Work, added places) in the address suggestion lists
+  useEffect(() => {
+    setSavedPlacesSuggestions(profile?.savedPlaces || null);
+  }, [profile?.savedPlaces]);
   const { order, orderId, isLoading: isActiveOrderLoading } = useActiveOrder();
   const [orderSplashExpired, setOrderSplashExpired] = useState(false);
 

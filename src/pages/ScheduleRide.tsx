@@ -17,8 +17,24 @@ export const ScheduleRide: React.FC = () => {
   const [currentYear, setCurrentYear] = useState(new Date().getFullYear());
   
   // Time picker state
-  const [selectedHour, setSelectedHour] = useState(18);
-  const [selectedMinute, setSelectedMinute] = useState(54);
+  // start at "now + 30 minutes" instead of a made-up time
+  const initialTime = React.useMemo(() => new Date(Date.now() + 30 * 60 * 1000), []);
+  const [selectedHour, setSelectedHour] = useState(initialTime.getHours());
+  const [selectedMinute, setSelectedMinute] = useState(initialTime.getMinutes());
+  // What is typed in the boxes. It may be empty while editing (backspace works); the real number is clamped.
+  const pad2 = (n: number) => String(n).padStart(2, '0');
+  const [hourText, setHourText] = useState(pad2(initialTime.getHours()));
+  const [minuteText, setMinuteText] = useState(pad2(initialTime.getMinutes()));
+  const bumpHour = (d: number) => { const n = (selectedHour + d + 24) % 24; setSelectedHour(n); setHourText(pad2(n)); };
+  const bumpMinute = (d: number) => { const n = (selectedMinute + d + 60) % 60; setSelectedMinute(n); setMinuteText(pad2(n)); };
+  const typeTime = (raw: string, max: number, setText: (t: string) => void, setNum: (n: number) => void) => {
+    const digits = raw.replace(/\D/g, '').slice(0, 2);
+    if (digits === '') { setText(''); return; }            // user rubbed it out: allow empty
+    const n = parseInt(digits, 10);
+    if (n > max) return;                                    // e.g. 25 hours / 75 minutes: ignore that key press
+    setText(digits);
+    setNum(n);
+  };
   
   // Manual date input state
   const [manualDate, setManualDate] = useState('');
@@ -407,22 +423,20 @@ export const ScheduleRide: React.FC = () => {
               <div className="flex items-center justify-center space-x-4 mb-8">
                 {/* Hour Picker: 00 - 23 only, wraps around */}
                 <div className="text-center">
-                  <button type="button" aria-label="More hours" onClick={() => setSelectedHour((h) => (h + 1) % 24)} className="text-[#5B2EFF] text-xl leading-none px-3 py-1">▲</button>
+                  <button type="button" aria-label="More hours" onClick={() => bumpHour(1)} className="text-[#5B2EFF] text-xl leading-none px-3 py-1">▲</button>
                   <div className="border-2 border-[#5B2EFF] rounded-lg p-4 my-1">
                     <input
                       type="text"
                       inputMode="numeric"
                       maxLength={2}
-                      value={String(selectedHour).padStart(2, '0')}
+                      value={hourText}
                       onFocus={(e) => e.currentTarget.select()}
-                      onChange={(e) => {
-                        const digits = e.target.value.replace(/\D/g, '').slice(-2);
-                        setSelectedHour(Math.min(23, parseInt(digits || '0', 10)));
-                      }}
+                      onChange={(e) => typeTime(e.target.value, 23, setHourText, setSelectedHour)}
+                      onBlur={() => { if (hourText === '') setSelectedHour(0); setHourText(pad2(hourText === '' ? 0 : selectedHour)); }}
                       className="text-4xl font-light text-center w-16 bg-transparent outline-none text-gray-900 dark:text-white"
                     />
                   </div>
-                  <button type="button" aria-label="Fewer hours" onClick={() => setSelectedHour((h) => (h + 23) % 24)} className="text-[#5B2EFF] text-xl leading-none px-3 py-1">▼</button>
+                  <button type="button" aria-label="Fewer hours" onClick={() => bumpHour(-1)} className="text-[#5B2EFF] text-xl leading-none px-3 py-1">▼</button>
                   <div className="text-sm text-gray-500 dark:text-gray-400">Hour</div>
                 </div>
 
@@ -430,22 +444,20 @@ export const ScheduleRide: React.FC = () => {
 
                 {/* Minute Picker: 00 - 59 only, wraps around */}
                 <div className="text-center">
-                  <button type="button" aria-label="More minutes" onClick={() => setSelectedMinute((m) => (m + 1) % 60)} className="text-[#5B2EFF] text-xl leading-none px-3 py-1">▲</button>
+                  <button type="button" aria-label="More minutes" onClick={() => bumpMinute(1)} className="text-[#5B2EFF] text-xl leading-none px-3 py-1">▲</button>
                   <div className="bg-gray-100 dark:bg-gray-800 rounded-lg p-4 my-1">
                     <input
                       type="text"
                       inputMode="numeric"
                       maxLength={2}
-                      value={String(selectedMinute).padStart(2, '0')}
+                      value={minuteText}
                       onFocus={(e) => e.currentTarget.select()}
-                      onChange={(e) => {
-                        const digits = e.target.value.replace(/\D/g, '').slice(-2);
-                        setSelectedMinute(Math.min(59, parseInt(digits || '0', 10)));
-                      }}
+                      onChange={(e) => typeTime(e.target.value, 59, setMinuteText, setSelectedMinute)}
+                      onBlur={() => { if (minuteText === '') setSelectedMinute(0); setMinuteText(pad2(minuteText === '' ? 0 : selectedMinute)); }}
                       className="text-4xl font-light text-center w-16 bg-transparent outline-none text-gray-900 dark:text-white"
                     />
                   </div>
-                  <button type="button" aria-label="Fewer minutes" onClick={() => setSelectedMinute((m) => (m + 59) % 60)} className="text-[#5B2EFF] text-xl leading-none px-3 py-1">▼</button>
+                  <button type="button" aria-label="Fewer minutes" onClick={() => bumpMinute(-1)} className="text-[#5B2EFF] text-xl leading-none px-3 py-1">▼</button>
                   <div className="text-sm text-gray-500 dark:text-gray-400">Minute</div>
                 </div>
               </div>

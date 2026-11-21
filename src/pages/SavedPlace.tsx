@@ -3,7 +3,7 @@ import { ArrowLeft, MapPin, Trash2, Navigation } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { doc, setDoc } from 'firebase/firestore';
 import { auth, db } from '../config/firebase';
-import { searchAddresses, reverseGeocode, GeoapifyAddress, RECENT_ADDRESSES_UPDATED_EVENT } from '../services/geoapifyService';
+import { searchAddresses, reverseGeocode, GeoapifyAddress, RECENT_ADDRESSES_UPDATED_EVENT, setSavedPlacesSuggestions } from '../services/geoapifyService';
 import { useGeolocation } from '../hooks/useGeolocation';
 import { SavedPlace, SavedPlaces } from '../types';
 
@@ -56,6 +56,7 @@ export const SavedPlacePage: React.FC = () => {
       if (mode === 'home' || mode === 'work') next[mode] = place;
       else next.custom = existing?.id ? next.custom.map(item => item.id === existing.id ? place : item) : [...next.custom, place];
       await setDoc(doc(db, 'users', uid), { savedPlaces: next, updatedAt: Date.now() }, { merge: true });
+      setSavedPlacesSuggestions(next); // shows at once on Your Route / Foodies Route
       window.dispatchEvent(new Event(RECENT_ADDRESSES_UPDATED_EVENT));
       navigate('/account');
     } finally { setSaving(false); }
@@ -67,7 +68,9 @@ export const SavedPlacePage: React.FC = () => {
     const next: SavedPlaces = { ...current, custom: current.custom || [] };
     if (mode === 'custom') next.custom = next.custom.filter(item => item.id !== existing.id);
     else delete next[mode];
+    // Home / Work rows always stay on the Account page; only the address filled into them is removed.
     await setDoc(doc(db, 'users', uid), { savedPlaces: next, updatedAt: Date.now() }, { merge: true });
+    setSavedPlacesSuggestions(next);
     window.dispatchEvent(new Event(RECENT_ADDRESSES_UPDATED_EVENT));
     navigate('/account');
   };
@@ -85,7 +88,7 @@ export const SavedPlacePage: React.FC = () => {
         </div>}
       </label>
       <button disabled={!canSave || saving} onClick={() => void save()} className="w-full rounded-xl bg-[#5B2EFF] py-4 font-semibold text-white disabled:opacity-40">{saving ? 'Saving…' : 'Done'}</button>
-      {existing && <button onClick={() => void remove()} className="w-full flex items-center justify-center gap-2 py-3 text-red-600"><Trash2 size={18} />Delete place</button>}
+      {existing && <button onClick={() => void remove()} className="w-full flex items-center justify-center gap-2 py-3 text-red-600"><Trash2 size={18} />{mode === 'custom' ? 'Delete place' : 'Remove saved address'}</button>}
     </div>
   </main>;
 };

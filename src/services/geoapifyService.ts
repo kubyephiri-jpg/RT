@@ -56,7 +56,54 @@ const notifyRecentAddressesUpdated = () => {
 /**
  * Get recent addresses from localStorage
  */
+// Saved places (Home, Work, "Add a place") are mirrored here so every search box can list them first.
+const SAVED_PLACES_KEY = 'ALETWENDE_SAVED_PLACES';
+
+export const setSavedPlacesSuggestions = (
+  places?: { home?: any; work?: any; custom?: any[] } | null
+): void => {
+  try {
+    const list: GeoapifyAddress[] = [];
+    const add = (p: any, label: string) => {
+      if (p && p.address && Number.isFinite(Number(p.lat)) && Number.isFinite(Number(p.lng))) {
+        list.push({
+          id: `saved-${p.id || label}`,
+          address: p.address,
+          description: `${label} · Saved place`,
+          coords: { lat: Number(p.lat), lng: Number(p.lng) },
+        });
+      }
+    };
+    add(places?.home, 'Home');
+    add(places?.work, 'Work');
+    (places?.custom || []).forEach((p) => add(p, p?.title || 'Saved place'));
+    const next = JSON.stringify(list);
+    if (localStorage.getItem(SAVED_PLACES_KEY) !== next) {
+      localStorage.setItem(SAVED_PLACES_KEY, next);
+      notifyRecentAddressesUpdated();
+    }
+  } catch (error) {
+    console.error('Error saving saved-place suggestions:', error);
+  }
+};
+
+const readSavedPlaceSuggestions = (): GeoapifyAddress[] => {
+  try {
+    const stored = localStorage.getItem(SAVED_PLACES_KEY);
+    return stored ? JSON.parse(stored) : [];
+  } catch {
+    return [];
+  }
+};
+
+/** Saved places first (top of the list), then recent addresses. */
 export const getRecentAddresses = (): GeoapifyAddress[] => {
+  const saved = readSavedPlaceSuggestions();
+  const savedKeys = new Set(saved.map((s) => s.address.trim().toLowerCase()));
+  return [...saved, ...readRecentAddresses().filter((a) => !savedKeys.has((a.address || '').trim().toLowerCase()))];
+};
+
+const readRecentAddresses = (): GeoapifyAddress[] => {
   try {
     const stored = localStorage.getItem(RECENT_ADDRESSES_KEY);
     if (stored) {
@@ -73,7 +120,8 @@ export const getRecentAddresses = (): GeoapifyAddress[] => {
  */
 export const saveRecentAddress = (address: GeoapifyAddress): void => {
   try {
-    const recent = getRecentAddresses();
+    if (address.id.startsWith('saved-')) return; // saved places are not duplicated into recents
+    const recent = readRecentAddresses();
     const filtered = recent.filter(a => a.id !== address.id);
     filtered.unshift(address);
     const trimmed = filtered.slice(0, MAX_RECENT_ADDRESSES);
@@ -98,7 +146,7 @@ export const reconcileRecentAddresses = async (userId: string): Promise<Geoapify
     const snapshot = await getDoc(doc(db, 'users', userId));
     const remote = snapshot.data()?.recentAddresses;
     if (Array.isArray(remote)) {
-      const local = getRecentAddresses();
+      const local = readRecentAddresses();
       const merged = [...remote, ...local].filter(
         (address, index, addresses) => addresses.findIndex(item => item.id === address.id) === index
       ).slice(0, MAX_RECENT_ADDRESSES);
