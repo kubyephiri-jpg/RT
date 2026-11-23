@@ -10,6 +10,10 @@ import maplibreWorkerUrl from '../maplibre-worker?worker&url';
 import polyline from '@mapbox/polyline';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { getDriverVehicleIcon, vehicleIconUrl } from '../utils/vehicleIconHelper';
+import {
+  buildRoute, projectOnRoute, pointAt, bearingAt, sliceFrom, bearingBetween, metersBetween, turnToward,
+  type RouteModel,
+} from '../utils/routeFollow';
 
 maplibregl.setWorkerUrl(maplibreWorkerUrl);
 
@@ -357,18 +361,6 @@ const createArrivalCard = (arrivalTime: string): HTMLElement => {
 const isNum = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n);
 const validLL = (p: any): p is { lat: number; lng: number } => !!p && isNum(p.lat) && isNum(p.lng);
 
-const toRad = (d: number) => (d * Math.PI) / 180;
-const distMeters = (aLat: number, aLng: number, bLat: number, bLng: number) => {
-  const x = toRad(bLng - aLng) * Math.cos(toRad((aLat + bLat) / 2));
-  const y = toRad(bLat - aLat);
-  return Math.sqrt(x * x + y * y) * 6371000;
-};
-const bearingDeg = (aLat: number, aLng: number, bLat: number, bLng: number) => {
-  const y = Math.sin(toRad(bLng - aLng)) * Math.cos(toRad(bLat));
-  const x = Math.cos(toRad(aLat)) * Math.sin(toRad(bLat)) - Math.sin(toRad(aLat)) * Math.cos(toRad(bLat)) * Math.cos(toRad(bLng - aLng));
-  return ((Math.atan2(y, x) * 180) / Math.PI + 360) % 360;
-};
-
 export const MapLibreMap: React.FC<MapLibreMapProps> = ({
   center = { lat: -15.3875, lng: 28.3228 }, // Lusaka fallback while location is unavailable
   zoom = 13,
@@ -395,8 +387,15 @@ export const MapLibreMap: React.FC<MapLibreMapProps> = ({
   const markersRef = useRef<{ [key: string]: maplibregl.Marker }>({});
   const markerAnimationFramesRef = useRef<{ [key: string]: number }>({});
   const driverMarkerRef = useRef<maplibregl.Marker | null>(null);
-  const routeCoordsRef = useRef<[number, number][]>([]); // [lat, lng] of the line being drawn
-  const vehicleAngleRef = useRef<number | null>(null);
+  const routeRef = useRef<RouteModel | null>(null); // the full route; the line is trimmed from the vehicle forward
+  const sAnimRef = useRef(0); // metres along the route where the vehicle is drawn right now
+  const vehicleAnimRef = useRef<number | null>(null);
+  const lastLineAtRef = useRef(0);
+  const lastFrameAtRef = useRef(0);
+  const lastGpsAtRef = useRef(0);
+  const lastGpsPosRef = useRef<{ lat: number; lng: number } | null>(null);
+  const rotTargetRef = useRef<number | null>(null);
+  const rotAngleRef = useRef<number | null>(null);
   const etaBubbleRef = useRef<maplibregl.Marker | null>(null);
   const arrivalCardRef = useRef<maplibregl.Marker | null>(null);
   const routeFitKeyRef = useRef<string | null>(null);
@@ -525,6 +524,7 @@ export const MapLibreMap: React.FC<MapLibreMapProps> = ({
       if (loadTimeout !== undefined) window.clearTimeout(loadTimeout);
       Object.values(markerAnimationFramesRef.current).forEach(cancelAnimationFrame);
       markerAnimationFramesRef.current = {};
+      if (vehicleAnimRef.current) cancelAnimationFrame(vehicleAnimRef.current);
       map.current?.remove();
       map.current = null;
     };
@@ -644,13 +644,27 @@ export const MapLibreMap: React.FC<MapLibreMapProps> = ({
     }
   }, [markers, isMapLoaded, fitBounds, driverPosition]);
 
-  // Update polyline (in place; never throws; re-frames the camera only when the route changes)
+  // Draw the line (or clear it when there is nothing left to show).
+  const drawRouteLine = (coords: [number, number][]) => {
+    const m = map.current;
+    if (!m) return;
+    const src = m.getSource('route') as maplibregl.GeoJSONSource | undefined;
+    if (!src) return;
+    src.setData(
+      coords.length >= 2
+        ? { type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: coords } }
+        : { type: 'FeatureCollection', features: [] }
+    );
+  };
+
+  // Update polyline (in place; never throws; re-frames the camera only when the route changes).
+  // The page now passes the FULL route; the vehicle code below trims it from the vehicle forward.
   useEffect(() => {
     const m = map.current;
     if (!m || !isMapLoaded) return;
 
     const removeRoute = () => {
-      routeCoordsRef.current = [];
+      routeRef.current = null;
       try { if (m.getLayer('route-line')) m.removeLayer('route-line'); } catch { /* already gone */ }
       try { if (m.getSource('route')) m.removeSource('route'); } catch { /* already gone */ }
     };
@@ -663,16 +677,26 @@ export const MapLibreMap: React.FC<MapLibreMapProps> = ({
 
     try {
       const decoded = polyline.decode(encodedPolyline);
-      const coordinates = decoded.map(([lat, lng]) => [lng, lat]);
-      routeCoordsRef.current = decoded.map(([lat, lng]) => [lat, lng] as [number, number]);
+      const coordinates = decoded.map(([lat, lng]) => [lng, lat] as [number, number]);
       if (coordinates.length < 2) {
         removeRoute();
         return;
       }
+      const route = buildRoute(coordinates);
+      routeRef.current = route;
+
+      // Start the line where the vehicle is now (a re-sent or re-routed line must never show the part behind it).
+      let startS = 0;
+      const mk = driverMarkerRef.current?.getLngLat();
+      if (mk) {
+        const pr = projectOnRoute(route, mk.lng, mk.lat, 0, route.total + 1);
+        if (pr.off <= 60) startS = pr.s;
+      }
+      sAnimRef.current = startS;
       const feature = {
         type: 'Feature' as const,
         properties: {},
-        geometry: { type: 'LineString' as const, coordinates },
+        geometry: { type: 'LineString' as const, coordinates: sliceFrom(route, startS) },
       };
 
       const existing = m.getSource('route') as maplibregl.GeoJSONSource | undefined;
@@ -680,6 +704,7 @@ export const MapLibreMap: React.FC<MapLibreMapProps> = ({
         existing.setData(feature);
       } else {
         removeRoute();
+        routeRef.current = route;
         m.addSource('route', { type: 'geojson', data: feature });
         m.addLayer({
           id: 'route-line',
@@ -690,7 +715,7 @@ export const MapLibreMap: React.FC<MapLibreMapProps> = ({
         });
       }
 
-      // Frame the route only when the destination changes (new route), not on every trim.
+      // Frame the route only when the destination changes (new trip leg), not on a re-route of the same leg.
       const last = coordinates[coordinates.length - 1];
       const fitKey = `${last[0].toFixed(4)},${last[1].toFixed(4)}`;
       if (routeFitKeyRef.current !== fitKey) {
@@ -710,74 +735,136 @@ export const MapLibreMap: React.FC<MapLibreMapProps> = ({
     }
   }, [encodedPolyline, isMapLoaded]);
 
-  // Turn the vehicle to face where it is going: along the remaining route when there is one,
-  // otherwise along its last movement.
-  const rotateVehicle = (fromLat: number, fromLng: number, toLat: number, toLng: number) => {
+  // Turn the vehicle picture toward rotTargetRef at a limited speed, the short way round
+  // (maxStepDeg >= 1e5 means "jump straight there"). Never snaps, so it never looks bent.
+  const stepRotation = (maxStepDeg: number) => {
     const img = driverMarkerRef.current?.getElement().querySelector('img') as HTMLImageElement | null;
-    if (!img) return;
-    let target: number | null = null;
-    const route = routeCoordsRef.current;
-    for (let i = 0; i < route.length; i++) {
-      if (distMeters(toLat, toLng, route[i][0], route[i][1]) > 8) {
-        target = bearingDeg(toLat, toLng, route[i][0], route[i][1]);
-        break;
-      }
-    }
-    if (target === null && distMeters(fromLat, fromLng, toLat, toLng) > 4) {
-      target = bearingDeg(fromLat, fromLng, toLat, toLng);
-    }
-    if (target === null) return;
-    const prev = vehicleAngleRef.current;
-    // Take the shortest way round so the car never spins the long way.
-    const next = prev === null ? target : prev + ((((target - prev) % 360) + 540) % 360) - 180;
-    vehicleAngleRef.current = next;
-    img.style.transition = 'transform 0.4s ease-out';
+    const target = rotTargetRef.current;
+    if (!img || target === null || !Number.isFinite(target)) return;
+    const want = target - (map.current?.getBearing() ?? 0);
+    const cur = rotAngleRef.current;
+    const next = cur === null || maxStepDeg >= 1e5 ? want : turnToward(cur, want, maxStepDeg);
+    rotAngleRef.current = next;
+    img.style.transition = 'none';
     img.style.transform = `rotate(${next}deg)`;
   };
 
-  // Update driver marker with smooth animation
+  // Move the vehicle. On the route: snapped to it and moved ALONG its shape at an even speed, facing the road
+  // ahead, with the line trimmed to the vehicle on every frame. Off the route: straight to the GPS point,
+  // facing the direction of travel.
   useEffect(() => {
     if (!map.current || !isMapLoaded || !validLL(driverPosition)) return;
 
-    if (driverMarkerRef.current) {
-      // Animate existing marker
-      const currentPos = driverMarkerRef.current.getLngLat();
-      const newPos = new maplibregl.LngLat(driverPosition.lng, driverPosition.lat);
-      rotateVehicle(currentPos.lat, currentPos.lng, newPos.lat, newPos.lng);
-      
-      // Smooth interpolation
-      let start: number | null = null;
-      const duration = 1000; // 1 second animation
-      
-      const animate = (timestamp: number) => {
-        if (!start) start = timestamp;
-        const progress = Math.min((timestamp - start) / duration, 1);
-        
-        // Ease out cubic
-        const eased = 1 - Math.pow(1 - progress, 3);
-        
-        const interpolatedLng = currentPos.lng + (newPos.lng - currentPos.lng) * eased;
-        const interpolatedLat = currentPos.lat + (newPos.lat - currentPos.lat) * eased;
-        
-        driverMarkerRef.current?.setLngLat([interpolatedLng, interpolatedLat]);
-        
-        if (progress < 1) {
-          requestAnimationFrame(animate);
-        } else {
-          onDriverMove?.(driverPosition);
-        }
-      };
-      
-      requestAnimationFrame(animate);
-    } else {
-      // Create new animated vehicle marker (icon based on vehicleType + color)
+    const SNAP_M = 30;
+    const TURN_DEG_PER_MS = 0.25;
+    const { lat, lng } = driverPosition;
+
+    const nowPerf = performance.now();
+    const gap = lastGpsAtRef.current ? nowPerf - lastGpsAtRef.current : 1000;
+    lastGpsAtRef.current = nowPerf;
+    const dur = Math.max(700, Math.min(2500, gap * 1.05 || 1000));
+    const prevGps = lastGpsPosRef.current;
+    lastGpsPosRef.current = { lat, lng };
+
+    let marker = driverMarkerRef.current;
+    if (!marker) {
       const el = createVehicleElement(vehicleType, vehicleColor, vehicleIcon);
-      driverMarkerRef.current = new maplibregl.Marker({ element: el })
-        .setLngLat([driverPosition.lng, driverPosition.lat])
-        .addTo(map.current);
-      rotateVehicle(driverPosition.lat, driverPosition.lng, driverPosition.lat, driverPosition.lng);
+      marker = new maplibregl.Marker({ element: el }).setLngLat([lng, lat]).addTo(map.current);
+      driverMarkerRef.current = marker;
+      rotTargetRef.current = null;
+      rotAngleRef.current = null;
     }
+    const mk = marker;
+
+    if (vehicleAnimRef.current) cancelAnimationFrame(vehicleAnimRef.current);
+    vehicleAnimRef.current = null;
+
+    const route = routeRef.current;
+    let onRoute = false;
+    let s1 = sAnimRef.current;
+    if (route) {
+      const pr = projectOnRoute(route, lng, lat, sAnimRef.current);
+      const wentBack = sAnimRef.current - pr.s > 60;
+      if (pr.off <= SNAP_M && !wentBack) {
+        onRoute = true;
+        s1 = Math.max(pr.s, sAnimRef.current); // never move backwards because of GPS noise
+      }
+    }
+
+    const updateLine = (s: number, force: boolean, ts: number) => {
+      const r = routeRef.current;
+      if (!r) return;
+      if (!force && ts - lastLineAtRef.current < 90) return;
+      lastLineAtRef.current = ts;
+      // close to the end: nothing left to draw
+      drawRouteLine(r.total - s < 12 ? [] : (sliceFrom(r, s) as [number, number][]));
+    };
+
+    if (onRoute && route) {
+      const s0 = sAnimRef.current;
+      if (s1 - s0 < 0.5) {
+        const b = bearingAt(route, s1);
+        if (Number.isFinite(b)) { rotTargetRef.current = b; stepRotation(1e6); }
+        mk.setLngLat(pointAt(route, s1));
+        updateLine(s1, true, nowPerf);
+        onDriverMove?.(driverPosition);
+        return;
+      }
+      let t0: number | null = null;
+      lastFrameAtRef.current = 0;
+      const frame = (ts: number) => {
+        if (routeRef.current !== route) return; // a new route arrived; the next GPS update takes over
+        if (t0 === null) t0 = ts;
+        const t = Math.min(1, (ts - t0) / dur);
+        const s = s0 + (s1 - s0) * t; // even speed, like a real vehicle
+        sAnimRef.current = s;
+        mk.setLngLat(pointAt(route, s));
+        const b = bearingAt(route, s);
+        if (Number.isFinite(b)) rotTargetRef.current = b;
+        const dt = lastFrameAtRef.current ? ts - lastFrameAtRef.current : 16;
+        lastFrameAtRef.current = ts;
+        stepRotation(rotAngleRef.current === null ? 1e6 : TURN_DEG_PER_MS * Math.min(dt, 50));
+        updateLine(s, t >= 1, ts);
+        if (t < 1) vehicleAnimRef.current = requestAnimationFrame(frame);
+        else { vehicleAnimRef.current = null; onDriverMove?.(driverPosition); }
+      };
+      vehicleAnimRef.current = requestAnimationFrame(frame);
+      return;
+    }
+
+    // not on a route: straight to the GPS point, facing the direction of travel
+    const start = mk.getLngLat();
+    const moved = metersBetween(start.lat, start.lng, lat, lng);
+    if (prevGps && metersBetween(prevGps.lat, prevGps.lng, lat, lng) > 6) {
+      rotTargetRef.current = bearingBetween(prevGps.lat, prevGps.lng, lat, lng);
+    } else if (moved > 6) {
+      rotTargetRef.current = bearingBetween(start.lat, start.lng, lat, lng);
+    }
+    let t0: number | null = null;
+    lastFrameAtRef.current = 0;
+    const frame = (ts: number) => {
+      if (t0 === null) t0 = ts;
+      const t = Math.min(1, (ts - t0) / dur);
+      mk.setLngLat([start.lng + (lng - start.lng) * t, start.lat + (lat - start.lat) * t]);
+      const dt = lastFrameAtRef.current ? ts - lastFrameAtRef.current : 16;
+      lastFrameAtRef.current = ts;
+      stepRotation(rotAngleRef.current === null ? 1e6 : TURN_DEG_PER_MS * Math.min(dt, 50));
+      if (t < 1) vehicleAnimRef.current = requestAnimationFrame(frame);
+      else { vehicleAnimRef.current = null; onDriverMove?.(driverPosition); }
+    };
+    vehicleAnimRef.current = requestAnimationFrame(frame);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [driverPosition, isMapLoaded, onDriverMove, vehicleType, vehicleColor, vehicleIcon]);
+
+  // Keep the picture facing the right way when the map itself is rotated.
+  useEffect(() => {
+    const m = map.current;
+    if (!m || !isMapLoaded) return;
+    const onRotate = () => stepRotation(1e6);
+    m.on('rotate', onRotate);
+    return () => { m.off('rotate', onRotate); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isMapLoaded]);
 
   // Swap the vehicle icon image when vehicleType or vehicleColor changes (without recreating the marker)
   useEffect(() => {

@@ -9,7 +9,6 @@ import { RatingModal } from '../components/RatingModal';
 import { MessagePanel } from '../components/MessagePanel';
 import { MapLibreMap, MapMarker } from '../components/MapLibreMap';
 import { listenToDriverLocation } from '../services/trackingService';
-import { trimPolylineFromPosition } from '../utils/polylineUtils';
 import { useGlobalCart } from '../contexts/GlobalCartContext';
 import { useMessageContext } from '../contexts/MessageContext';
 import { useUserProfile } from '../hooks/useUserProfile';
@@ -405,10 +404,7 @@ export const LiveTrackingPage: React.FC = () => {
               const ll = toLL(loc);
               if (!ll) return;
               setDriverLocation(ll);
-              if (fullPolylineRef.current) {
-                const trimmed = trimPolylineFromPosition(fullPolylineRef.current, ll.lat, ll.lng);
-                setTrimmedPolyline(trimmed || null);
-              }
+              // The map snaps the vehicle to the route and trims the line itself.
             });
           }
         };

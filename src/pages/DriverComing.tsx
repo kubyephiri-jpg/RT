@@ -15,7 +15,6 @@ import { useMessageContext } from '../contexts/MessageContext';
 import { auth, db } from '../config/firebase';
 import { doc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { listenToDriverLocation } from '../services/trackingService';
-import { trimPolylineFromPosition } from '../utils/polylineUtils';
 import polylineLib from '@mapbox/polyline';
 import { soundManager } from '../utils/notificationSound';
 import { usePreventBack } from '../hooks/usePreventBack';
@@ -272,11 +271,7 @@ export const DriverComing: React.FC<DriverComingProps> = ({
           gpsListenerRef.current = listenToDriverLocation(driverIdForGps, (driverLoc) => {
             // Always move the animated vehicle
             setDriverLocation({ lat: driverLoc.lat, lng: driverLoc.lng });
-            // Trim the polyline from the current position forward
-            if (fullPolylineRef.current) {
-              const trimmed = trimPolylineFromPosition(fullPolylineRef.current, driverLoc.lat, driverLoc.lng);
-              setTrimmedPolyline(trimmed || null);
-            }
+            // The map snaps the vehicle to the route and trims the line itself.
           });
         }
       };
