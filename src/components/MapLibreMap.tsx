@@ -396,6 +396,7 @@ export const MapLibreMap: React.FC<MapLibreMapProps> = ({
   const lastGpsPosRef = useRef<{ lat: number; lng: number } | null>(null);
   const rotTargetRef = useRef<number | null>(null);
   const rotAngleRef = useRef<number | null>(null);
+  const headingAnchorRef = useRef<{ lat: number; lng: number } | null>(null);
   const etaBubbleRef = useRef<maplibregl.Marker | null>(null);
   const arrivalCardRef = useRef<maplibregl.Marker | null>(null);
   const routeFitKeyRef = useRef<string | null>(null);
@@ -757,6 +758,7 @@ export const MapLibreMap: React.FC<MapLibreMapProps> = ({
 
     const SNAP_M = 30;
     const TURN_DEG_PER_MS = 0.25;
+    const JUMP_M = 80; // after the app was asleep the vehicle is far behind: jump, do not race across the map
     const { lat, lng } = driverPosition;
 
     const nowPerf = performance.now();
@@ -802,6 +804,18 @@ export const MapLibreMap: React.FC<MapLibreMapProps> = ({
 
     if (onRoute && route) {
       const s0 = sAnimRef.current;
+      headingAnchorRef.current = { lat, lng };
+      const here = mk.getLngLat();
+      const aim = pointAt(route, s1);
+      if (metersBetween(here.lat, here.lng, aim[1], aim[0]) > JUMP_M) {
+        sAnimRef.current = s1;
+        mk.setLngLat(aim);
+        const bj = bearingAt(route, s1);
+        if (Number.isFinite(bj)) { rotTargetRef.current = bj; stepRotation(1e6); }
+        updateLine(s1, true, nowPerf);
+        onDriverMove?.(driverPosition);
+        return;
+      }
       if (s1 - s0 < 0.5) {
         const b = bearingAt(route, s1);
         if (Number.isFinite(b)) { rotTargetRef.current = b; stepRotation(1e6); }
@@ -835,10 +849,20 @@ export const MapLibreMap: React.FC<MapLibreMapProps> = ({
     // not on a route: straight to the GPS point, facing the direction of travel
     const start = mk.getLngLat();
     const moved = metersBetween(start.lat, start.lng, lat, lng);
-    if (prevGps && metersBetween(prevGps.lat, prevGps.lng, lat, lng) > 6) {
-      rotTargetRef.current = bearingBetween(prevGps.lat, prevGps.lng, lat, lng);
-    } else if (moved > 6) {
-      rotTargetRef.current = bearingBetween(start.lat, start.lng, lat, lng);
+    // Measured from the last point we turned at (not from the previous fix), so slow driving and turns
+    // still change the heading.
+    const anchor = headingAnchorRef.current || prevGps;
+    if (anchor && metersBetween(anchor.lat, anchor.lng, lat, lng) > 4) {
+      rotTargetRef.current = bearingBetween(anchor.lat, anchor.lng, lat, lng);
+      headingAnchorRef.current = { lat, lng };
+    } else if (!anchor) {
+      headingAnchorRef.current = { lat, lng };
+    }
+    if (moved > JUMP_M) {
+      mk.setLngLat([lng, lat]);
+      stepRotation(1e6);
+      onDriverMove?.(driverPosition);
+      return;
     }
     let t0: number | null = null;
     lastFrameAtRef.current = 0;
